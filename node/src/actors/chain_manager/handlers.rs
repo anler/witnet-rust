@@ -5,7 +5,7 @@ use witnet_data_structures::{
     chain::{CheckpointBeacon, Epoch, Hashable, InventoryEntry, InventoryItem},
     error::ChainInfoError,
 };
-use witnet_validations::validations::validate_block;
+use witnet_validations::validations::{validate_block, validate_transaction, UtxoDiff};
 
 use super::{ChainManager, ChainManagerError, StateMachine};
 use crate::{
@@ -20,7 +20,6 @@ use crate::{
     utils::mode_consensus,
 };
 use std::collections::HashMap;
-use witnet_validations::validations::validate_transaction;
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // ACTOR MESSAGE HANDLERS
@@ -89,13 +88,11 @@ impl Handler<EpochNotification<EveryEpochPayload>> for ChainManager {
                 if let (Some(current_epoch), Some(chain_info)) =
                     (self.current_epoch, self.chain_state.chain_info.as_ref())
                 {
-                    let candidates = self.candidates.clone();
-
                     // Decide the best candidate
                     // TODO: replace for loop with a try_fold
                     let mut chosen_candidate = None;
-                    for (key, block_candidate) in candidates {
-                        if let Some((chosen_key, _)) = chosen_candidate.clone() {
+                    for (key, block_candidate) in self.candidates.drain() {
+                        if let Some((chosen_key, _, _)) = chosen_candidate {
                             if chosen_key < key {
                                 // Ignore candidates with bigger hashes
                                 continue;
@@ -107,24 +104,19 @@ impl Handler<EpochNotification<EveryEpochPayload>> for ChainManager {
                             chain_info.highest_block_checkpoint,
                             self.genesis_block_hash,
                             &self.chain_state.unspent_outputs_pool,
-                            &self.transactions_pool,
                             &self.chain_state.data_request_pool,
                         ) {
-                            Ok(block_in_chain) => chosen_candidate = Some((key, block_in_chain)),
+                            Ok(utxo_diff) => {
+                                chosen_candidate = Some((key, block_candidate, utxo_diff))
+                            }
                             Err(e) => debug!("{}", e),
                         }
                     }
 
                     // Consolidate the best candidate
-                    if let Some((_, block_in_chain)) = chosen_candidate {
+                    if let Some((_, block, utxo_diff)) = chosen_candidate {
                         // Persist block and update ChainState
-                        self.consolidate_block(
-                            ctx,
-                            block_in_chain.block,
-                            block_in_chain.utxo_set,
-                            block_in_chain.data_request_pool,
-                            true,
-                        );
+                        self.consolidate_block(ctx, &block, utxo_diff);
                     } else {
                         warn!(
                             "There is no valid block candidate to consolidate for epoch {}",
@@ -197,15 +189,28 @@ impl Handler<AddBlocks> for ChainManager {
         match self.sm_state {
             StateMachine::WaitingConsensus => {}
             StateMachine::Synchronizing => {
-                let old_chain_state = self.chain_state.clone();
                 if let Some(target_beacon) = self.target_beacon {
-                    for block in msg.blocks {
+                    let mut batch_succeded = true;
+                    for block in msg.blocks.iter() {
                         if let Err(e) = self.process_requested_block(ctx, block) {
-                            warn!("{}", e);
-                            self.chain_state = old_chain_state;
+                            log::error!("Error processing block: {}", e);
+                            self.initialize_from_storage(ctx);
+                            log::info!("Restored chain state from storage");
+                            batch_succeded = false;
                             break;
                         }
                     }
+
+                    if batch_succeded {
+                        self.persist_chain_state(ctx);
+                        self.persist_blocks_batch(ctx, msg.blocks);
+                        let to_be_stored =
+                            self.chain_state.data_request_pool.finished_data_requests();
+                        to_be_stored.into_iter().for_each(|dr| {
+                            self.persist_data_request(ctx, &dr);
+                        });
+                    }
+
                     let our_beacon = self
                         .chain_state
                         .chain_info
@@ -268,9 +273,10 @@ impl Handler<AddTransaction> for ChainManager {
             debug!("Transaction is already in the pool: {}", transaction_hash);
             return;
         } else {
+            let utxo_diff = UtxoDiff::new(&self.chain_state.unspent_outputs_pool);
             match validate_transaction(
                 &msg.transaction,
-                &self.chain_state.unspent_outputs_pool,
+                &utxo_diff,
                 &self.chain_state.data_request_pool,
                 &mut HashMap::new(),
             ) {
@@ -364,7 +370,7 @@ impl Handler<PeersBeacons> for ChainManager {
                         // TODO: Be functional my friend
                         if let Some(consensus_block) = self.candidates.remove(&consensus_block_hash)
                         {
-                            match self.process_requested_block(ctx, consensus_block) {
+                            match self.process_requested_block(ctx, &consensus_block) {
                                 Ok(()) => {
                                     debug!("Consolidate consensus candidate. Synced state");
                                     StateMachine::Synced
