@@ -253,9 +253,19 @@ impl ChainManager {
         }
     }
 
-    fn persist_blocks_batch(&self, ctx: &mut Context<Self>, blocks: Vec<Block>) {
+    fn persist_blocks_batch(
+        &self,
+        ctx: &mut Context<Self>,
+        blocks: Vec<Block>,
+        target_beacon: CheckpointBeacon,
+    ) {
         for block in blocks {
+            let block_hash = block.hash();
             self.persist_item(ctx, InventoryItem::Block(block));
+
+            if block_hash == target_beacon.hash_prev_block {
+                break;
+            }
         }
     }
 
@@ -309,7 +319,6 @@ impl ChainManager {
                             transaction: reveal,
                         })
                     }
-
                     self.persist_item(ctx, InventoryItem::Block(block.clone()));
 
                     // Persist chain_info into storage
@@ -325,6 +334,14 @@ impl ChainManager {
                 error!("No ChainInfo loaded in ChainManager");
             }
         }
+    }
+
+    fn get_chain_beacon(&self) -> CheckpointBeacon {
+        self.chain_state
+            .chain_info
+            .as_ref()
+            .unwrap()
+            .highest_block_checkpoint
     }
 }
 

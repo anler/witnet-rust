@@ -19,7 +19,11 @@ use crate::{
     },
     utils::mode_consensus,
 };
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    thread::sleep,
+    time::Duration
+};
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // ACTOR MESSAGE HANDLERS
@@ -199,11 +203,15 @@ impl Handler<AddBlocks> for ChainManager {
                             batch_succeded = false;
                             break;
                         }
+
+                        if self.get_chain_beacon() == target_beacon {
+                            break;
+                        }
                     }
 
                     if batch_succeded {
                         self.persist_chain_state(ctx);
-                        self.persist_blocks_batch(ctx, msg.blocks);
+                        self.persist_blocks_batch(ctx, msg.blocks, target_beacon);
                         let to_be_stored =
                             self.chain_state.data_request_pool.finished_data_requests();
                         to_be_stored.into_iter().for_each(|dr| {
@@ -211,13 +219,7 @@ impl Handler<AddBlocks> for ChainManager {
                         });
                     }
 
-                    let our_beacon = self
-                        .chain_state
-                        .chain_info
-                        .as_ref()
-                        .unwrap()
-                        .highest_block_checkpoint;
-                    if our_beacon == target_beacon {
+                    if self.get_chain_beacon() == target_beacon {
                         // Target achived, go back to state 1
                         self.sm_state = StateMachine::WaitingConsensus;
                     } else {
@@ -411,9 +413,7 @@ impl Handler<PeersBeacons> for ChainManager {
             StateMachine::Synchronizing => {
                 // We are synchronizing, so ignore all the new beacons until we reach the target beacon
 
-                // Return error meaning unexpected message, because if we return Ok(vec![]), the
-                // SessionsManager will mark all the peers as safu and break our security assumptions
-                Err(())
+                Ok(vec![])
             }
             StateMachine::Synced => {
                 // If we are synced and the consensus beacon is not the same as our beacon, then
