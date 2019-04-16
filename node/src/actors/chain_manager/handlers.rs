@@ -19,11 +19,7 @@ use crate::{
     },
     utils::mode_consensus,
 };
-use std::{
-    collections::HashMap,
-    thread::sleep,
-    time::Duration
-};
+use std::collections::HashMap;
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // ACTOR MESSAGE HANDLERS
@@ -399,9 +395,6 @@ impl Handler<PeersBeacons> for ChainManager {
                             StateMachine::Synchronizing
                         }
                     };
-
-                    // Clear candidates
-                    self.candidates.clear();
 
                     Ok(peers_out_of_consensus)
                 } else {
