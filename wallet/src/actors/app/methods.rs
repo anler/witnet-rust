@@ -133,6 +133,31 @@ impl App {
         Box::new(f)
     }
 
+    /// Get a list of pending transactions associated to a wallet account.
+    ///
+    /// A pending transaction is one that hasn't been confirmed by the
+    /// node, that is, included in a block.
+    pub fn get_pending_transactions(
+        &mut self,
+        session_id: types::SessionId,
+        wallet_id: String,
+        offset: u32,
+        limit: u32,
+    ) -> ResponseActFuture<model::Transactions> {
+        let f = fut::result(self.state.wallet(&session_id, &wallet_id)).and_then(
+            move |wallet, slf: &mut Self, _| {
+                slf.params
+                    .worker
+                    .send(worker::GetPendingTransactions(wallet, offset, limit))
+                    .flatten()
+                    .map_err(From::from)
+                    .into_actor(slf)
+            },
+        );
+
+        Box::new(f)
+    }
+
     /// Run a RADRequest and return the computed result.
     pub fn run_rad_request(&self, req: types::RADRequest) -> ResponseFuture<types::RadonTypes> {
         let f = self

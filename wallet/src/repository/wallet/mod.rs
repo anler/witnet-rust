@@ -227,6 +227,14 @@ where
         })
     }
 
+    /// Return a list of the pending transactions.
+    ///
+    /// A pending transaction is one that hasn't been confirmed by the
+    /// node, that is, included in a block.
+    pub fn pending_transactions(&self, offset: u32, limit: u32) -> Result<model::Transactions> {
+        unimplemented!()
+    }
+
     /// Get and address if exists.
     pub fn get_address(&self, account: u32, keychain: u32, index: u32) -> Result<model::Address> {
         let address = self.db.get(&keys::address(account, keychain, index))?;

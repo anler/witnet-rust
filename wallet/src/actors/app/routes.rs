@@ -165,6 +165,11 @@ pub fn connect_routes<T, S>(
             "getTransactions",
             GetTransactionsRequest
         ),
+        (
+            "Get-Pending-Transactions",
+            "getPendingTransactions",
+            GetPendingTransactionsRequest
+        ),
         ("Send-Vtt", "sendVtt", SendVttRequest),
         (
             "Send-Transaction",

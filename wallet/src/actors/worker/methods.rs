@@ -223,6 +223,17 @@ impl Worker {
         Ok(transactions)
     }
 
+    pub fn pending_transactions(
+        &mut self,
+        wallet: &types::Wallet,
+        offset: u32,
+        limit: u32,
+    ) -> Result<model::Transactions> {
+        let pending_transactions = wallet.pending_transactions(offset, limit)?;
+
+        Ok(pending_transactions)
+    }
+
     pub fn get(&self, wallet: &types::Wallet, key: &str) -> Result<Option<String>> {
         let value = wallet.kv_get(key)?;
 
